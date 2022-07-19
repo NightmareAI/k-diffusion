@@ -1,0 +1,38 @@
+build:
+  gpu: true
+
+  system_packages:
+    - "libsm6"
+    - "libxext6"
+    - "libglib2.0-0"
+
+  # python version in the form '3.8' or '3.8.12'
+  python_version: "3.8"
+
+  python_packages:
+   - "torch==1.9.0"
+   - "torchvision==0.10.0"
+   - "accelerate==0.11.0"
+   - "clean-fid==0.1.26"
+   - "einops==0.4.1"
+   - "jsonmerge==1.8.0"
+   - "kornia==0.6.6"
+   - "lpips==0.1.4"
+   - "Pillow==9.2.0"
+   - "opencv-python==4.6.0.66"   
+   - "resize-right==0.0.2"
+   - "scikit-image==0.19.3"
+   - "scipy==1.8.1"
+   - "tqdm==4.64.0"
+   - "wandb==0.12.21"
+  
+
+  run:
+    - "pip install git+https://github.com/openai/CLIP"
+    - "pip install git+https://github.com/crowsonkb/guided-diffusion"
+    - "mkdir -p /root/.cache/k-diffusion; wget -O /root/.cache/k-diffusion/256x256_diffusion_uncond.pt https://models.nmb.ai/disco/256x256_diffusion_uncond.pt"    
+    - "mkdir -p /root/.cache/torch/hub/checkpoints; wget -O /root/.cache/torch/hub/checkpoints/vgg16-397923af.pth https://models.nmb.ai/disco/vgg16-397923af.pth"
+
+# predict.py defines how predictions are run on your model
+predict: "predict.py:Predictor"
+image: r8.im/nightmareai/k-diffusion
