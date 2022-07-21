@@ -19,10 +19,14 @@ build:
    - "kornia==0.6.6"
    - "lpips==0.1.4"
    - "Pillow==9.2.0"
+   - "pytorch-lightning==1.5"   
    - "opencv-python==4.6.0.66"   
+   - "omegaconf==2.1.1"
    - "resize-right==0.0.2"
    - "scikit-image==0.19.3"
    - "scipy==1.8.1"
+   - "torchdiffeq==0.2.3"
+   - "transformers==4.3.1"
    - "tqdm==4.64.0"
    - "wandb==0.12.21"
   
@@ -30,8 +34,10 @@ build:
   run:
     - "pip install git+https://github.com/openai/CLIP"
     - "pip install git+https://github.com/crowsonkb/guided-diffusion"
-    - "mkdir -p /root/.cache/k-diffusion; wget -O /root/.cache/k-diffusion/256x256_diffusion_uncond.pt https://models.nmb.ai/disco/256x256_diffusion_uncond.pt"    
+    - "git clone https://github.com/CompVis/taming-transformers.git && cd taming-transformers && pip install -e . && cd .."
+    #- "mkdir -p /root/.cache/k-diffusion; wget -O /root/.cache/k-diffusion/256x256_diffusion_uncond.pt https://models.nmb.ai/disco/256x256_diffusion_uncond.pt"    
     - "mkdir -p /root/.cache/torch/hub/checkpoints; wget -O /root/.cache/torch/hub/checkpoints/vgg16-397923af.pth https://models.nmb.ai/disco/vgg16-397923af.pth"
+    - "mkdir -p /root/.cache/k-diffusion; wget --quiet -O /root/.cache/k-diffusion/latent_diffusion_txt2img_f8_large.ckpt https://models.nmb.ai/majesty/latent_diffusion_txt2img_f8_large.ckpt"
 
 # predict.py defines how predictions are run on your model
 predict: "predict.py:Predictor"

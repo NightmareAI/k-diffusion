@@ -1,3 +1,6 @@
 [submodule "guided-diffusion"]
 	path = guided-diffusion
 	url = https://github.com/crowsonkb/guided-diffusion
+[submodule "latent-diffusion"]
+	path = latent-diffusion
+	url = https://github.com/CompVis/latent-diffusion.git
