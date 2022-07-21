@@ -244,18 +244,19 @@ class Predictor(BasePredictor):
             # Anti-grain hack for the 256x256 ImageNet model
             #fac = sigma / (sigma ** 2 + 1) ** 0.5
             #denoised_in = x.lerp(denoised, fac)
+            denoised_in = model.decode_first_stage_model.decode(denoised / model.scale_factor)
 
             #clip_in = self.normalize(make_cutouts(denoised_in.add(1).div(2)))
-            clip_in = self.normalize(make_cutouts(model.decode_first_stage(denoised)))
+            clip_in = self.normalize(make_cutouts(denoised_in))
             image_embeds = self.clip_model.encode_image(clip_in).float()
             dists = spherical_dist_loss(image_embeds[:, None], target_embeds[None])
             dists = dists.view([cutn, n, -1])
             losses = dists.mul(weights).sum(2).mean(0)
-            tv_losses = tv_loss(denoised)
-            range_losses = range_loss(denoised)
+            tv_losses = tv_loss(denoised_in)
+            range_losses = range_loss(denoised_in)
             loss = losses.sum() * clip_guidance_scale + tv_losses.sum() * tv_scale + range_losses.sum() * range_scale
             if init is not None and init_scale:
-                init_losses = self.lpips_model(denoised, init)
+                init_losses = self.lpips_model(denoised_in, init)
                 loss = loss + init_losses.sum() * init_scale
             return -torch.autograd.grad(loss, x)[0]
 
