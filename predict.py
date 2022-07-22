@@ -112,15 +112,19 @@ class CFGDenoiser(nn.Module):
         super().__init__()
         self.inner_model = model
         self.cond_fn = cond_fn
-        self.orig_denoised = None
 
     def forward(self, x, sigma, uncond, cond, cond_scale):
-        x_in = torch.cat([x] * 2)
-        sigma_in = torch.cat([sigma] * 2)
-        cond_in = torch.cat([uncond, cond])
-        uncond, cond = self.inner_model(x_in, sigma_in, cond=cond_in).chunk(2)
-        cond = self.cond_fn(x, sigma, denoised=cond, cond=cond)
-        return uncond + (cond - uncond) * cond_scale
+        with torch.enable_grad():
+            x = x.detach().requires_grad_()
+            x_in = torch.cat([x] * 2)
+            sigma_in = torch.cat([sigma] * 2)
+            cond_in = torch.cat([uncond, cond])
+            denoised = self.inner_model(x, sigma, cond=cond)
+            uncond, cond = self.inner_model(x_in, sigma_in, cond=cond_in).chunk(2)   
+            cond_grad = self.cond_fn(x, sigma, denoised=denoised, cond=cond_in)
+            #doesn't work due to tensor size
+            #cond_denoised = denoised + cond_grad * K.utils.append_dims(sigma ** 2, x.ndim)
+            return uncond + (cond - uncond) * cond_scale
 
 class Predictor(BasePredictor):
 
@@ -255,9 +259,11 @@ class Predictor(BasePredictor):
             init = init.resize((side_x, side_y), Image.Resampling.LANCZOS)
             init = TF.to_tensor(init).to(self.device)[None] * 2 - 1
 
-        def cond_fn(x, sigma, denoised, cond):
+        def cond_fn(x, sigma, denoised, cond, **kwargs):
+            x = x.detach()
+            x = x.requires_grad_()
             n = x.shape[0]
-
+            
             # Anti-grain hack for the 256x256 ImageNet model
             #fac = sigma / (sigma ** 2 + 1) ** 0.5
             #denoised_in = x.lerp(denoised, fac)
@@ -275,15 +281,16 @@ class Predictor(BasePredictor):
             if init is not None and init_scale:
                 init_losses = self.lpips_model(denoised_in, init)
                 loss = loss + init_losses.sum() * init_scale
-            return loss
-        
+                        
+            return -torch.autograd.grad(loss, denoised_in)[0]
+
         #model_wrap = K.external.OpenAIDenoiser(self.model, self.diffusion, device=self.device)
         self.model_wrap = K.external.CompVisDenoiser(self.model, False, device=self.device)
         sigmas = self.model_wrap.get_sigmas(n_steps)
         if init is not None:
             sigmas = sigmas[sigmas <= sigma_start]
         self.model_wrap_cfg = CFGDenoiser(self.model_wrap, cond_fn)
-        #self.model_guided = GuidedDenoiserWithGrad(self.model_wrap, cond_fn)
+        #self.model_guided = GuidedDenoiserWithGrad(self.model_wrap_cfg, cond_fn)
 
         output = queue.SimpleQueue()
 
@@ -330,7 +337,8 @@ class Predictor(BasePredictor):
             filename = f'out_{i}.png'
             Image.fromarray(sample.astype(np.uint8)).save(filename)
             yield Path(filename)
-    
+
+    @torch.no_grad()
     def worker(self):
         self.x = torch.randn([1, 4, self.side_y//8, self.side_x//8], device=self.device)
         if self.init is not None:
