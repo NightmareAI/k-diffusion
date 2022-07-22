@@ -108,21 +108,16 @@ class GuidedDenoiserWithGrad(nn.Module):
         return cond_denoised
 
 class CFGDenoiser(nn.Module):
-    def __init__(self, model, cond_fn):
+    def __init__(self, model):
         super().__init__()
         self.inner_model = model
-        self.cond_fn = cond_fn
 
-    def forward(self, x, sigma, uncond, cond, cond_scale):
-        with torch.enable_grad():
-            x = x.detach().requires_grad_()
-            x_in = torch.cat([x] * 2)
-            sigma_in = torch.cat([sigma] * 2)
-            cond_in = torch.cat([uncond, cond])
-            denoised = self.inner_model(x, sigma, cond=cond)
-            uncond, cond = self.inner_model(x_in, sigma_in, cond=cond_in).chunk(2)   
-            cond_grad = self.cond_fn(x, sigma, denoised=denoised, cond=cond_in)            
-            return uncond + (cond_grad - uncond) * cond_scale
+    def forward(self, x, sigma, uncond, cond, cond_scale):                    
+        x_in = torch.cat([x] * 2)
+        sigma_in = torch.cat([sigma] * 2)
+        cond_in = torch.cat([uncond, cond])            
+        uncond, cond = self.inner_model(x_in, sigma_in, cond=cond_in).chunk(2)               
+        return uncond + (cond - uncond) * cond_scale            
 
 class Predictor(BasePredictor):
 
@@ -177,7 +172,7 @@ class Predictor(BasePredictor):
     def setup(self):        
         self.device = torch.device('cuda')
         self.LoadCompVisModel()        
-        self.model.requires_grad_(False).eval().to(self.device)
+        self.model.requires_grad_().eval().to(self.device)
         #if self.model_config['use_fp16']:
         #    self.model.convert_to_fp16()
         
@@ -197,10 +192,8 @@ class Predictor(BasePredictor):
         image_prompt: Path = Input(description="Image prompt",default=None),
         #batch_size: int = Input(description="The number of generations to run",ge=1,le=10,default=1),
         n_steps: int = Input(description="The number of timesteps to use", ge=50,le=1000,default=500),
-        latent_scale: int = Input(description="Latent guidance scale, higher for stronger latent guidance", default=1.0),
+        latent_scale: int = Input(description="Latent guidance scale, higher for stronger latent guidance", default=5.0),
         clip_guidance_scale: int = Input(description="Controls how much the image should look like the prompt.", default=1000),
-        tv_scale: int = Input(description="Controls the smoothness of the final output.", default=100),
-        range_scale: int = Input(description="Controls how far out of range RGB values are allowed to be.", default=50),
         cutn: int = Input(description="The number of random crops per step.", default=16),
         cut_pow: float = Input(description="Cut power", default=0.5),        
         seed: int = Input(description="Seed (leave empty to use a random seed)", default=None, le=(2**32-1), ge=0),
@@ -258,8 +251,6 @@ class Predictor(BasePredictor):
             init = TF.to_tensor(init).to(self.device)[None] * 2 - 1
 
         def cond_fn(x, sigma, denoised, cond, **kwargs):
-            x = x.detach()
-            x = x.requires_grad_()
             n = x.shape[0]
             
             # Anti-grain hack for the 256x256 ImageNet model
@@ -268,41 +259,38 @@ class Predictor(BasePredictor):
             denoised_in = self.model.first_stage_model.decode(denoised / self.model.scale_factor)
 
             #clip_in = self.normalize(make_cutouts(denoised_in.add(1).div(2)))
-            clip_in = self.normalize(make_cutouts(denoised_in))
+            clip_in = self.normalize(make_cutouts(denoised_in.add(1).div(2)))
             image_embeds = self.clip_model.encode_image(clip_in).float()
             dists = spherical_dist_loss(image_embeds[:, None], target_embeds[None])
             dists = dists.view([cutn, n, -1])
             losses = dists.mul(weights).sum(2).mean(0)
-            tv_losses = tv_loss(denoised_in)
-            range_losses = range_loss(denoised_in)
-            loss = losses.sum() * clip_guidance_scale + tv_losses.sum() * tv_scale + range_losses.sum() * range_scale
+            loss = losses.sum() * clip_guidance_scale
             if init is not None and init_scale:
                 init_losses = self.lpips_model(denoised_in, init)
                 loss = loss + init_losses.sum() * init_scale
                         
-            grad = -torch.autograd.grad(loss, denoised_in)[0]
-            return self.model.first_stage_model.encode(grad).sample()
+            return -torch.autograd.grad(loss, x)[0]            
 
         #model_wrap = K.external.OpenAIDenoiser(self.model, self.diffusion, device=self.device)
         self.model_wrap = K.external.CompVisDenoiser(self.model, False, device=self.device)
         sigmas = self.model_wrap.get_sigmas(n_steps)
         if init is not None:
             sigmas = sigmas[sigmas <= sigma_start]
-        self.model_wrap_cfg = CFGDenoiser(self.model_wrap, cond_fn)
-        #self.model_guided = GuidedDenoiserWithGrad(self.model_wrap_cfg, cond_fn)
+        self.model_wrap_cfg = CFGDenoiser(self.model_wrap)
+        self.model_guided = GuidedDenoiserWithGrad(self.model_wrap_cfg, cond_fn)
 
         output = queue.SimpleQueue()
 
         def callback(info):
             if info['i'] % 50 == 0:                
-            #    denoised = self.model_wrap.decode_first_stage(self.x)
-            #    nrow = math.ceil(denoised.shape[0] ** 0.5)
-            #    grid = utils.make_grid(denoised, nrow, padding=0)
-            #    tqdm.write(f'Step {info["i"]} of {len(sigmas) - 1}:')                                
-            #    filename = f'step_{i}.png'
-            #    K.utils.to_pil_image(grid).save(filename)
-            #    output.put(filename)
-            #    #display.display(K.utils.to_pil_image(grid))
+                denoised = self.model.decode_first_stage(self.model_guided.orig_denoised)
+                nrow = math.ceil(denoised.shape[0] ** 0.5)
+                grid = utils.make_grid(denoised, nrow, padding=0)
+                tqdm.write(f'Step {info["i"]} of {len(sigmas) - 1}:')                                
+                filename = f'step_{i}.png'
+                K.utils.to_pil_image(grid).save(filename)
+                output.put(filename)
+                #display.display(K.utils.to_pil_image(grid))
                 tqdm.write(f'')
 
         if seed is not None:
@@ -339,12 +327,13 @@ class Predictor(BasePredictor):
 
     @torch.no_grad()
     def worker(self):
-        self.x = torch.randn([1, 4, self.side_y//8, self.side_x//8], device=self.device)
-        if self.init is not None:
-            self.x += self.init
-        n_samples = 1        
-        c = self.model.get_learned_conditioning(n_samples * [self.text_prompt])
-        uc = self.model.get_learned_conditioning(n_samples * [""])
-        extra_args = {'cond': c, 'uncond': uc, 'cond_scale': self.latent_scale}
-        self.samples = K.sampling.sample_heun(self.model_wrap_cfg, self.x, self.sigmas, second_order=False, s_churn=20, callback=self.callback, extra_args=extra_args)
-        self.success = True
+        with self.model.ema_scope():
+            self.x = torch.randn([1, 4, self.side_y//8, self.side_x//8], device=self.device)
+            if self.init is not None:
+                self.x += self.init
+            n_samples = 1        
+            c = self.model.get_learned_conditioning(n_samples * [self.text_prompt])
+            uc = self.model.get_learned_conditioning(n_samples * [""])
+            extra_args = {'cond': c, 'uncond': uc, 'cond_scale': self.latent_scale}
+            self.samples = K.sampling.sample_heun(self.model_guided, self.x, self.sigmas, second_order=True, s_churn=20, callback=self.callback, extra_args=extra_args)
+            self.success = True
