@@ -107,6 +107,20 @@ class GuidedDenoiserWithGrad(nn.Module):
         cond_denoised = denoised + cond_grad * K.utils.append_dims(sigma ** 2, x.ndim)
         return cond_denoised
 
+class CFGDenoiser(nn.Module):
+    def __init__(self, model, cond_fn):
+        super().__init__()
+        self.inner_model = model
+        self.cond_fn = cond_fn
+        self.orig_denoised = None
+
+    def forward(self, x, sigma, uncond, cond, cond_scale):
+        x_in = torch.cat([x] * 2)
+        sigma_in = torch.cat([sigma] * 2)
+        cond_in = torch.cat([uncond, cond])
+        uncond, cond = self.inner_model(x_in, sigma_in, cond=cond_in).chunk(2)        
+        return uncond + (cond - uncond) * cond_scale
+
 class Predictor(BasePredictor):
 
     def LoadCompVisModel(self):
@@ -265,7 +279,8 @@ class Predictor(BasePredictor):
         sigmas = self.model_wrap.get_sigmas(n_steps)
         if init is not None:
             sigmas = sigmas[sigmas <= sigma_start]
-        self.model_guided = GuidedDenoiserWithGrad(self.model_wrap, cond_fn)
+        self.model_wrap_cfg = CFGDenoiser(self.model_wrap)
+        #self.model_guided = GuidedDenoiserWithGrad(self.model_wrap, cond_fn)
 
         output = queue.SimpleQueue()
 
@@ -319,5 +334,5 @@ class Predictor(BasePredictor):
             self.x += self.init
         n_samples = 1        
         c = self.model.get_learned_conditioning(n_samples * [self.text_prompt])
-        self.samples = K.sampling.sample_heun(self.model_wrap, self.x, self.sigmas, second_order=False, s_churn=20, callback=self.callback, extra_args={"cond": c})
+        self.samples = K.sampling.sample_heun(self.model_wrap_cfg, self.x, self.sigmas, second_order=False, s_churn=20, callback=self.callback, extra_args={"cond": c})
         self.success = True
