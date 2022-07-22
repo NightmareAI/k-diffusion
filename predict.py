@@ -194,6 +194,7 @@ class Predictor(BasePredictor):
         image_prompt: Path = Input(description="Image prompt",default=None),
         #batch_size: int = Input(description="The number of generations to run",ge=1,le=10,default=1),
         n_steps: int = Input(description="The number of timesteps to use", ge=50,le=1000,default=500),
+        latent_scale: int = Input(description="Latent guidance scale, higher for stronger latent guidance", default=1.0),
         clip_guidance_scale: int = Input(description="Controls how much the image should look like the prompt.", default=1000),
         tv_scale: int = Input(description="Controls the smoothness of the final output.", default=100),
         range_scale: int = Input(description="Controls how far out of range RGB values are allowed to be.", default=50),
@@ -203,6 +204,7 @@ class Predictor(BasePredictor):
     ) -> typing.Iterator[Path]:
         prompts = [text_prompt]
         self.text_prompt = text_prompt
+        self.latent_scale = latent_scale
         image_prompts = []
         if (image_prompt):
             image_prompts = [str(image_prompt)]
@@ -334,5 +336,7 @@ class Predictor(BasePredictor):
             self.x += self.init
         n_samples = 1        
         c = self.model.get_learned_conditioning(n_samples * [self.text_prompt])
-        self.samples = K.sampling.sample_heun(self.model_wrap_cfg, self.x, self.sigmas, second_order=False, s_churn=20, callback=self.callback, extra_args={"cond": c})
+        uc = self.model.get_learned_conditioning(n_samples * [""])
+        extra_args = {'cond': c, 'uncond': uc, 'cond_scale': self.latent_scale}
+        self.samples = K.sampling.sample_heun(self.model_wrap_cfg, self.x, self.sigmas, second_order=False, s_churn=20, callback=self.callback, extra_args=extra_args)
         self.success = True
