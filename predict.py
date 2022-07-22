@@ -121,10 +121,8 @@ class CFGDenoiser(nn.Module):
             cond_in = torch.cat([uncond, cond])
             denoised = self.inner_model(x, sigma, cond=cond)
             uncond, cond = self.inner_model(x_in, sigma_in, cond=cond_in).chunk(2)   
-            cond_grad = self.cond_fn(x, sigma, denoised=denoised, cond=cond_in)
-            #doesn't work due to tensor size
-            #cond_denoised = denoised + cond_grad * K.utils.append_dims(sigma ** 2, x.ndim)
-            return uncond + (cond - uncond) * cond_scale
+            cond_grad = self.cond_fn(x, sigma, denoised=denoised, cond=cond_in)            
+            return uncond + (cond_grad - uncond) * cond_scale
 
 class Predictor(BasePredictor):
 
@@ -282,7 +280,8 @@ class Predictor(BasePredictor):
                 init_losses = self.lpips_model(denoised_in, init)
                 loss = loss + init_losses.sum() * init_scale
                         
-            return -torch.autograd.grad(loss, denoised_in)[0]
+            grad = -torch.autograd.grad(loss, denoised_in)[0]
+            return self.model.first_stage_model.encode(grad).sample()
 
         #model_wrap = K.external.OpenAIDenoiser(self.model, self.diffusion, device=self.device)
         self.model_wrap = K.external.CompVisDenoiser(self.model, False, device=self.device)
