@@ -118,7 +118,8 @@ class CFGDenoiser(nn.Module):
         x_in = torch.cat([x] * 2)
         sigma_in = torch.cat([sigma] * 2)
         cond_in = torch.cat([uncond, cond])
-        uncond, cond = self.inner_model(x_in, sigma_in, cond=cond_in).chunk(2)        
+        uncond, cond = self.inner_model(x_in, sigma_in, cond=cond_in).chunk(2)
+        cond = self.cond_fn(x, sigma, denoised=cond, cond=cond)
         return uncond + (cond - uncond) * cond_scale
 
 class Predictor(BasePredictor):
@@ -260,7 +261,7 @@ class Predictor(BasePredictor):
             # Anti-grain hack for the 256x256 ImageNet model
             #fac = sigma / (sigma ** 2 + 1) ** 0.5
             #denoised_in = x.lerp(denoised, fac)
-            denoised_in = model.decode_first_stage_model.decode(denoised / model.scale_factor)
+            denoised_in = self.model.first_stage_model.decode(denoised / self.model.scale_factor)
 
             #clip_in = self.normalize(make_cutouts(denoised_in.add(1).div(2)))
             clip_in = self.normalize(make_cutouts(denoised_in))
@@ -274,14 +275,14 @@ class Predictor(BasePredictor):
             if init is not None and init_scale:
                 init_losses = self.lpips_model(denoised_in, init)
                 loss = loss + init_losses.sum() * init_scale
-            return -torch.autograd.grad(loss, x)[0]
-
+            return loss
+        
         #model_wrap = K.external.OpenAIDenoiser(self.model, self.diffusion, device=self.device)
         self.model_wrap = K.external.CompVisDenoiser(self.model, False, device=self.device)
         sigmas = self.model_wrap.get_sigmas(n_steps)
         if init is not None:
             sigmas = sigmas[sigmas <= sigma_start]
-        self.model_wrap_cfg = CFGDenoiser(self.model_wrap)
+        self.model_wrap_cfg = CFGDenoiser(self.model_wrap, cond_fn)
         #self.model_guided = GuidedDenoiserWithGrad(self.model_wrap, cond_fn)
 
         output = queue.SimpleQueue()
