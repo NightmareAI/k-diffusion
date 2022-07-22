@@ -10,6 +10,7 @@ import tempfile
 import threading
 import typing
 import queue
+import open_clip
 
 from omegaconf import OmegaConf
 import clip
@@ -140,9 +141,9 @@ class Predictor(BasePredictor):
 #            'use_scale_shift_norm': True,
 #        })
         self.model_config['image_size'] = 256
-        self.model_path = "/root/.cache/k-diffusion/latent_diffusion_txt2img_f8_large.ckpt"        
-        pl_sd = torch.load(self.model_path, map_location='cuda')
-        sd = pl_sd["state_dict"]
+        self.model_path = "/root/.cache/k-diffusion/txt2img-f8-large-jack000-finetuned-fp16.ckpt"        
+        sd = torch.load(self.model_path, map_location='cuda')        
+        #sd = pl_sd["state_dict"]
         self.model = instantiate_from_config(self.model_config.model)
         m, u = self.model.load_state_dict(sd, strict=False)                
 
@@ -176,8 +177,11 @@ class Predictor(BasePredictor):
         #if self.model_config['use_fp16']:
         #    self.model.convert_to_fp16()
         
-        self.clip_model = clip.load('ViT-B/16', jit=False)[0].eval().requires_grad_(False).to(self.device)
-        self.clip_size = self.clip_model.visual.input_resolution
+        self.clip_model, _, self.preprocess = open_clip.create_model_and_transforms('ViT-B-32', pretrained='laion2b_e16')
+        self.clip_model = self.clip_model.eval().requires_grad_(False).to(self.device)        
+        #self.clip_model = clip.load('ViT-B/32', jit=False)[0].eval().requires_grad_(False).to(self.device)
+        #self.clip_size = self.clip_model.vison.input_resolution        
+        self.clip_size = 224
         self.normalize = transforms.Normalize(mean=[0.48145466, 0.4578275, 0.40821073],
                                  std=[0.26862954, 0.26130258, 0.27577711])
         self.lpips_model = lpips.LPIPS(net='vgg').to(self.device)
@@ -226,7 +230,7 @@ class Predictor(BasePredictor):
 
         for prompt in prompts:            
             txt, weight = parse_prompt(prompt)
-            target_embeds.append(self.clip_model.encode_text(clip.tokenize(txt).to(self.device)).float())
+            target_embeds.append(self.clip_model.encode_text(open_clip.tokenize(txt).to(self.device)).float())
             weights.append(weight)
 
         for prompt in image_prompts:
