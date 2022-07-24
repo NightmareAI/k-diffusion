@@ -253,6 +253,7 @@ class Predictor(BasePredictor):
             init = Image.open(fetch(init_image)).convert('RGB')
             init = init.resize((side_x, side_y), Image.Resampling.LANCZOS)
             init = TF.to_tensor(init).to(self.device)[None] * 2 - 1
+            init = self.model.first_stage_model.encode(init)
 
         def cond_fn(x, sigma, denoised, cond, **kwargs):
             n = x.shape[0]
@@ -339,5 +340,5 @@ class Predictor(BasePredictor):
             c = self.model.get_learned_conditioning(n_samples * [self.text_prompt])
             uc = self.model.get_learned_conditioning(n_samples * [""])
             extra_args = {'cond': c, 'uncond': uc, 'cond_scale': self.latent_scale}
-            self.samples = K.sampling.sample_heun(self.model_guided, self.x, self.sigmas, second_order=True, s_churn=20, callback=self.callback, extra_args=extra_args)
+            self.samples = K.sampling.sample_heun(self.model_guided, self.x, self.sigmas, second_order=False, s_churn=20, callback=self.callback, extra_args=extra_args)
             self.success = True
