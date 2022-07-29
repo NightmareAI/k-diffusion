@@ -20,8 +20,8 @@
         }
     },
     "dataset": {
-        "type": "imagefolder",
-        "location": "/path/to/dataset"
+        "type": "cifar10",
+        "location": "data"
     },
     "optimizer": {
         "type": "adamw",

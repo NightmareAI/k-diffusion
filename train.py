@@ -15,6 +15,7 @@ from torch import multiprocessing as mp
 from torch.utils import data
 from torchvision import datasets, transforms, utils
 from tqdm.auto import trange, tqdm
+from functools import partial
 
 import k_diffusion as K
 
@@ -34,27 +35,27 @@ def main():
                    help='the number of samples to draw to evaluate')
     p.add_argument('--gns', action='store_true',
                    help='measure the gradient noise scale (DDP only)')
+    p.add_argument('--grad-accum-steps', type=int, default=1,
+                   help='the number of gradient accumulation steps')
     p.add_argument('--grow', type=str,
                    help='the checkpoint to grow from')
     p.add_argument('--grow-config', type=str,
                    help='the configuration file of the model to grow from')
     p.add_argument('--lr', type=float,
                    help='the learning rate')
-    p.add_argument('--n-to-sample', type=int, default=64,
-                   help='the number of images to sample for demo grids')
     p.add_argument('--name', type=str, default='model',
                    help='the name of the run')
     p.add_argument('--num-workers', type=int, default=8,
                    help='the number of data loader workers')
     p.add_argument('--resume', type=str, 
                    help='the checkpoint to resume from')
+    p.add_argument('--sample-n', type=int, default=64,
+                   help='the number of images to sample for demo grids')
     p.add_argument('--save-every', type=int, default=10000,
                    help='save every this many steps')
     p.add_argument('--start-method', type=str, default='spawn',
                    choices=['fork', 'forkserver', 'spawn'],
                    help='the multiprocessing start method')
-    p.add_argument('--train-set', type=str, required=True,
-                   help='the training set location')
     p.add_argument('--wandb-entity', type=str,
                    help='the wandb entity name')
     p.add_argument('--wandb-group', type=str,
@@ -69,6 +70,7 @@ def main():
 
     config = K.config.load_config(open(args.config))
     model_config = config['model']
+    dataset_config = config['dataset']
     opt_config = config['optimizer']
     sched_config = config['lr_sched']
     ema_sched_config = config['ema_sched']
@@ -78,7 +80,7 @@ def main():
     size = model_config['input_size']
 
     ddp_kwargs = accelerate.DistributedDataParallelKwargs(find_unused_parameters=True)
-    accelerator = accelerate.Accelerator(kwargs_handlers=[ddp_kwargs])
+    accelerator = accelerate.Accelerator(kwargs_handlers=[ddp_kwargs], gradient_accumulation_steps=args.grad_accum_steps)
     device = accelerator.device
     print(f'Process {accelerator.process_index} using device: {device}', flush=True)
 
@@ -124,7 +126,23 @@ def main():
         transforms.CenterCrop(size[0]),
         K.augmentation.KarrasAugmentationPipeline(model_config['augment_prob']),
     ])
-    train_set = datasets.ImageFolder(args.train_set, transform=tf)
+
+    if dataset_config['type'] == 'imagefolder':
+        train_set = datasets.ImageFolder(dataset_config['location'], transform=tf)
+    elif dataset_config['type'] == 'cifar10':
+        train_set = datasets.CIFAR10(dataset_config['location'], train=True, download=True, transform=tf)
+    elif dataset_config['type'] == 'mnist':
+        train_set = datasets.MNIST(dataset_config['location'], train=True, download=True, transform=tf)
+    elif dataset_config['type'] == 'huggingface':
+        from datasets import load_dataset
+        train_set = load_dataset(dataset_config['location'])
+        train_set.set_transform(partial(K.utils.hf_datasets_augs_helper, transform=tf, image_key=dataset_config['image_key']))
+        train_set = train_set['train']
+    else:
+        raise ValueError('Invalid dataset type')
+
+    image_key = dataset_config.get('image_key', 0)
+
     train_dl = data.DataLoader(train_set, args.batch_size, shuffle=True, drop_last=True,
                                num_workers=args.num_workers, persistent_workers=True)
 
@@ -183,7 +201,7 @@ def main():
     train_iter = iter(train_dl)
     if accelerator.is_main_process:
         print('Computing features for reals...')
-    reals_features = K.evaluation.compute_features(accelerator, lambda x: next(train_iter)[0][1], extractor, args.evaluate_n, args.batch_size)
+    reals_features = K.evaluation.compute_features(accelerator, lambda x: next(train_iter)[image_key][1], extractor, args.evaluate_n, args.batch_size)
     if accelerator.is_main_process:
         metrics_log_filepath = Path(f'{args.name}_metrics.csv')
         if metrics_log_filepath.exists():
@@ -203,13 +221,13 @@ def main():
         if accelerator.is_main_process:
             tqdm.write('Sampling...')
         filename = f'{args.name}_demo_{step:08}.png'
-        n_per_proc = math.ceil(args.n_to_sample / accelerator.num_processes)
+        n_per_proc = math.ceil(args.sample_n / accelerator.num_processes)
         x = torch.randn([n_per_proc, model_config['input_channels'], size[0], size[1]], device=device) * sigma_max
         sigmas = K.sampling.get_sigmas_karras(50, sigma_min, sigma_max, rho=7., device=device)
         x_0 = K.sampling.sample_lms(model_ema, x, sigmas, disable=not accelerator.is_main_process)
-        x_0 = accelerator.gather(x_0)[:args.n_to_sample]
+        x_0 = accelerator.gather(x_0)[:args.sample_n]
         if accelerator.is_main_process:
-            grid = utils.make_grid(x_0, nrow=math.ceil(args.n_to_sample ** 0.5), padding=0)
+            grid = utils.make_grid(x_0, nrow=math.ceil(args.sample_n ** 0.5), padding=0)
             K.utils.to_pil_image(grid).save(filename)
             if use_wandb:
                 wandb.log({'demo_grid': wandb.Image(filename)}, step=step)
@@ -259,23 +277,25 @@ def main():
     try:
         while True:
             for batch in tqdm(train_dl, disable=not accelerator.is_main_process):
-                opt.zero_grad()
-                reals, _, aug_cond = batch[0]
-                noise = torch.randn_like(reals)
-                sigma = sample_density([reals.shape[0]], device=device)
-                losses = model.loss(reals, noise, sigma, aug_cond=aug_cond)
-                losses_all = accelerator.gather(losses.detach())
-                loss_local = losses.mean()
-                loss = losses_all.mean()
-                accelerator.backward(loss_local)
-                if args.gns:
-                    sq_norm_small_batch, sq_norm_large_batch = accelerator.reduce(gns_stats_hook.get_stats(), 'mean').tolist()
-                    gns_stats.update(sq_norm_small_batch, sq_norm_large_batch, reals.shape[0], reals.shape[0] * accelerator.num_processes)
-                opt.step()
-                sched.step()
-                ema_decay = ema_sched.get_value()
-                K.utils.ema_update(model, model_ema, ema_decay)
-                ema_sched.step()
+                with accelerator.accumulate(model):
+                    reals, _, aug_cond = batch[image_key]
+                    noise = torch.randn_like(reals)
+                    sigma = sample_density([reals.shape[0]], device=device)
+                    losses = model.loss(reals, noise, sigma, aug_cond=aug_cond)
+                    losses_all = accelerator.gather(losses.detach())
+                    loss_local = losses.mean()
+                    loss = losses_all.mean()
+                    accelerator.backward(loss_local)
+                    if args.gns:
+                        sq_norm_small_batch, sq_norm_large_batch = accelerator.reduce(gns_stats_hook.get_stats(), 'mean').tolist()
+                        gns_stats.update(sq_norm_small_batch, sq_norm_large_batch, reals.shape[0], reals.shape[0] * accelerator.num_processes)
+                    opt.step()
+                    sched.step()
+                    opt.zero_grad()
+                    if accelerator.sync_gradients:
+                        ema_decay = ema_sched.get_value()
+                        K.utils.ema_update(model, model_ema, ema_decay)
+                        ema_sched.step()
 
                 if accelerator.is_main_process:
                     if step % 25 == 0:
