@@ -1,5 +1,6 @@
 build:
   gpu: true
+  cuda: "11.2"
 
   system_packages:
     - "libsm6"
@@ -7,7 +8,7 @@ build:
     - "libglib2.0-0"
 
   # python version in the form '3.8' or '3.8.12'
-  python_version: "3.8"
+  python_version: "3.9"
 
   python_packages:
    - "torch==1.9.0"
@@ -20,6 +21,7 @@ build:
    - "lpips==0.1.4"
    - "Pillow==9.2.0"
    - "pytorch-lightning==1.5"   
+   - "pyyaml==6.0"
    - "opencv-python==4.6.0.66"  
    - "open-clip-torch==1.3.0" 
    - "omegaconf==2.1.1"
@@ -35,14 +37,28 @@ build:
   
 
   run:
-    - "pip install git+https://github.com/openai/CLIP"
-    - "pip install git+https://github.com/crowsonkb/guided-diffusion"
-    - "git clone https://github.com/CompVis/taming-transformers.git && cd taming-transformers && pip install -e . && cd .."
-    #- "mkdir -p /root/.cache/k-diffusion; wget -O /root/.cache/k-diffusion/256x256_diffusion_uncond.pt https://models.nmb.ai/disco/256x256_diffusion_uncond.pt"    
-    - "mkdir -p /root/.cache/torch/hub/checkpoints; wget -O /root/.cache/torch/hub/checkpoints/vgg16-397923af.pth https://models.nmb.ai/disco/vgg16-397923af.pth"    
-    - "mkdir -p /root/.cache/k-diffusion; wget --quiet -O /root/.cache/k-diffusion/txt2img-f8-large-jack000-finetuned-fp16.ckpt https://models.nmb.ai/majesty/txt2img-f8-large-jack000-finetuned-fp16.ckpt"
-    - "mkdir -p /root/.cache/clip; wget --quiet -O /root/.cache/clip/vit_b_32-laion2b_e16-af8dbd0c.pth https://models.nmb.ai/clip/vit_b_32-laion2b_e16-af8dbd0c.pth"
-
+    - pip install git+https://github.com/openai/CLIP
+    - pip install git+https://github.com/crowsonkb/guided-diffusion
+    - git clone https://github.com/CompVis/taming-transformers.git && cd taming-transformers && pip install -e . && cd ..
+    - mkdir -p /root/.cache/torch/hub/checkpoints; wget -O /root/.cache/torch/hub/checkpoints/vgg16-397923af.pth https://models.nmb.ai/disco/vgg16-397923af.pth
+    - mkdir -p /root/.cache/k-diffusion; wget --quiet -O /root/.cache/k-diffusion/txt2img-f8-large-jack000-finetuned-fp16.ckpt https://models.nmb.ai/majesty/txt2img-f8-large-jack000-finetuned-fp16.ckpt
+    - mkdir -p /root/.cache/clip; wget --quiet -O /root/.cache/clip/vit_b_32-laion2b_e16-af8dbd0c.pth https://models.nmb.ai/clip/vit_b_32-laion2b_e16-af8dbd0c.pth
+    #- mkdir -p /root/.cache/k-diffusion; wget -O /root/.cache/k-diffusion/256x256_diffusion_uncond.pt https://models.nmb.ai/disco/256x256_diffusion_uncond.pt
+    #- wget --quiet --output-document=/root/.cache/k-diffusion/512x512_diffusion_uncond_finetune_008100.pt https://models.nmb.ai/disco/512x512_diffusion_uncond_finetune_008100.pt
+    #- wget --quiet --output-document=/root/.cache/k-diffusion/256x256_openai_comics_faces_by_alex_spirin_084000.pt https://models.nmb.ai/disco/256x256_openai_comics_faces_by_alex_spirin_084000.pt
+    #- wget --quiet --output-document=/root/.cache/k-diffusion/pixel_art_diffusion_hard_256.pt https://models.nmb.ai/disco/pixel_art_diffusion_hard_256.pt
+    #- wget --quiet --output-document=/root/.cache/k-diffusion/pixel_art_diffusion_soft_256.pt https://models.nmb.ai/disco/pixel_art_diffusion_soft_256.pt
+    #- wget --quiet --output-document=/root/.cache/k-diffusion/lsun_uncond_100M_1200K_bs128.pt https://models.nmb.ai/disco/lsun_uncond_100M_1200K_bs128.pt    
+    #- wget --quiet --output-document=/root/.cache/k-diffusion/ukiyoe_diffusion_256_022000.pt https://models.nmb.ai/disco/ukiyoe_diffusion_256_022000.pt
+    #- wget --quiet --output-document=/root/.cache/k-diffusion/PADexpanded.pt https://models.nmb.ai/disco/PADexpanded.pt
+    #- wget --quiet --output-document=/root/.cache/k-diffusion/pixelartdiffusion4k.pt https://models.nmb.ai/disco/pixelartdiffusion4k.pt
+    #- wget --quiet --output-document=/root/.cache/k-diffusion/watercolordiffusion.pt https://models.nmb.ai/disco/watercolordiffusion.pt
+    #- wget --quiet --output-document=/root/.cache/k-diffusion/watercolordiffusion_2.pt https://models.nmb.ai/disco/watercolordiffusion_2.pt
+    #- wget --quiet --output-document=/root/.cache/k-diffusion/PulpSciFiDiffusion.pt https://models.nmb.ai/disco/PulpSciFiDiffusion.pt
+    #- wget --quiet --output-document=/root/.cache/k-diffusion/liminal_diffusion.pt https://models.nmb.ai/disco/liminal_diffusion.pt
+    #- wget --quiet --output-document=/root/.cache/k-diffusion/portrait_generator_v001_ema_0.9999_1MM.pt https://models.nmb.ai/disco/portrait_generator_v001_ema_0.9999_1MM.pt
+    #- wget --quiet --output-document=/root/.cache/k-diffusion/floraldiffusion.pt https://models.nmb.ai/disco/floraldiffusion.pt
+    #- wget --quiet --output-document=/root/.cache/k-diffusion/IsometricDiffusionRevrart512px.pt https://models.nmb.ai/disco/IsometricDiffusionRevrart512px.pt
 # predict.py defines how predictions are run on your model
 predict: "predict.py:Predictor"
 image: r8.im/nightmareai/k-diffusion
