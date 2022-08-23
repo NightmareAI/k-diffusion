@@ -4,3 +4,6 @@
 [submodule "latent-diffusion"]
 	path = latent-diffusion
 	url = https://github.com/CompVis/latent-diffusion.git
+[submodule "stable-diffusion"]
+	path = stable-diffusion
+	url = https://github.com/CompVis/stable-diffusion

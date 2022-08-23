@@ -41,7 +41,7 @@ build:
     - pip install git+https://github.com/crowsonkb/guided-diffusion
     - git clone https://github.com/CompVis/taming-transformers.git && cd taming-transformers && pip install -e . && cd ..
     - mkdir -p /root/.cache/torch/hub/checkpoints; wget -O /root/.cache/torch/hub/checkpoints/vgg16-397923af.pth https://models.nmb.ai/disco/vgg16-397923af.pth
-    - mkdir -p /root/.cache/k-diffusion; wget --quiet -O /root/.cache/k-diffusion/txt2img-f8-large-jack000-finetuned-fp16.ckpt https://models.nmb.ai/majesty/txt2img-f8-large-jack000-finetuned-fp16.ckpt
+    - mkdir -p /root/.cache/k-diffusion; wget --quiet -O /root/.cache/k-diffusion/sd-v1-4.ckpt http://models.nmb.ai/stable/sd-v1-4.ckpt
     - mkdir -p /root/.cache/clip; wget --quiet -O /root/.cache/clip/vit_b_32-laion2b_e16-af8dbd0c.pth https://models.nmb.ai/clip/vit_b_32-laion2b_e16-af8dbd0c.pth
     #- mkdir -p /root/.cache/k-diffusion; wget -O /root/.cache/k-diffusion/256x256_diffusion_uncond.pt https://models.nmb.ai/disco/256x256_diffusion_uncond.pt
     #- wget --quiet --output-document=/root/.cache/k-diffusion/512x512_diffusion_uncond_finetune_008100.pt https://models.nmb.ai/disco/512x512_diffusion_uncond_finetune_008100.pt
@@ -61,4 +61,4 @@ build:
     #- wget --quiet --output-document=/root/.cache/k-diffusion/IsometricDiffusionRevrart512px.pt https://models.nmb.ai/disco/IsometricDiffusionRevrart512px.pt
 # predict.py defines how predictions are run on your model
 predict: "predict.py:Predictor"
-image: r8.im/nightmareai/k-diffusion
+image: r8.im/nightmareai/clip-guided-stable-diffusion

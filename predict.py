@@ -32,7 +32,7 @@ import yaml
 from yaml import Loader
 
 sys.path.append('./guided-diffusion')
-sys.path.append('./latent-diffusion')
+sys.path.append('./stable-diffusion')
 from guided_diffusion.script_util import create_model_and_diffusion, model_and_diffusion_defaults
 from ldm.util import instantiate_from_config
 
@@ -147,9 +147,9 @@ class CFGDenoiser(nn.Module):
 class Predictor(BasePredictor):
 
     def LoadCompVisModel(self):
-        self.model_config = OmegaConf.load("/src/latent-diffusion/configs/latent-diffusion/txt2img-1p4B-eval.yaml")
-        self.model_config['image_size'] = 256
-        self.model_path = "/root/.cache/k-diffusion/txt2img-f8-large-jack000-finetuned-fp16.ckpt"        
+        self.model_config = OmegaConf.load("/src/stable-diffusion/configs/stable-diffusion/v1-inference.yaml")
+        self.model_config['image_size'] = 512
+        self.model_path = "/root/.cache/k-diffusion/sd-v1-4.ckpt"
         sd = torch.load(self.model_path, map_location='cuda')        
         #sd = pl_sd["state_dict"]
         self.model = instantiate_from_config(self.model_config.model)
@@ -198,7 +198,7 @@ class Predictor(BasePredictor):
         self,
         text_prompt: str = Input(description="Prompt",default="A mysterious orb by Ernst Fuchs"),
         #diffusion_model: str = Input(description="Diffusion Model",default="LatentDiffusionJack000Finetuned", choices=model_list.keys()),
-        sampling_mode: str = Input(description="Sampling mode", default="DPM-2", choices=["Huen", "DPM-2"]),
+        sampling_mode: str = Input(description="Sampling mode", default="DPM-2", choices=["K-LMS", "Huen", "DPM-2"]),
         #height: int = Input(description="Output Height (divisible by 64)", default=256),
         #width: int = Input(description="Output Width (divisible by 64)", default=256),        
         churn: float = Input(description="The amount of noise to add during sampling", default=50.),        
@@ -207,19 +207,19 @@ class Predictor(BasePredictor):
         init_scale: int = Input(description="This enhances the effect of the init image, a good value is 1000.", default=1000),
         image_prompt: Path = Input(description="Image prompt (CLIP only)",default=None),
         #batch_size: int = Input(description="The number of generations to run",ge=1,le=10,default=1),
-        n_steps: int = Input(description="The number of timesteps to use", ge=50,le=1000,default=500),
+        n_steps: int = Input(description="The number of timesteps to use", ge=10,le=200,default=50),
         latent_scale: int = Input(description="Latent guidance scale, higher for stronger latent guidance.", default=5.0),
-        clip_guidance_scale: int = Input(description="CLIP guidance scale, higher for stronger clip guidance. 0 to disable CLIP guidance.", default=1000),        
+        clip_guidance_scale: int = Input(description="CLIP guidance scale, higher for stronger clip guidance. 0 to disable CLIP guidance.", default=0),        
         cutn: int = Input(description="The number of random crops per step.", default=16),
         cut_pow: float = Input(description="Cut power", default=0.5),        
         seed: int = Input(description="Seed (leave empty to use a random seed)", default=None, le=(2**32-1), ge=0),
         output_steps: int = Input(description="Display an image after this many steps.", default=10, ge=0, le=50)
     ) -> typing.Iterator[Path]:
-        self.diffusion_model = "LatentDiffusionJack000Finetuned"
-        if self.diffusion_model == "LatentDiffusionJack000Finetuned":        
+        self.diffusion_model = "sd-v1-4.ckpt"
+        if self.diffusion_model == "sd-v1-4.ckpt":
             self.is_latent = True
             self.LoadCompVisModel()        
-            self.model.requires_grad_().eval().to(self.device)            
+            self.model.requires_grad_(False).eval().half().to(self.device)            
         else:
             self.is_latent = False
             self.LoadOpenAIModel()
@@ -286,7 +286,7 @@ class Predictor(BasePredictor):
                 else:
                     denoised_in = denoised
             else:
-                denoised_in = self.model.first_stage_model.decode(denoised / self.model.scale_factor)
+                denoised_in = self.model.first_stage_model.decode(denoised)
 
             #clip_in = self.normalize(make_cutouts(denoised_in.add(1).div(2)))
             clip_in = self.normalize(make_cutouts(denoised_in.add(1).div(2)))
@@ -313,9 +313,8 @@ class Predictor(BasePredictor):
             if clip_guidance_scale > 0:
                 self.model_final = GuidedDenoiserWithGrad(self.model_wrap_cfg, cond_fn)            
             else:
-                self.model_final = UnguidedDenoiser(self.model_wrap_cfg)                
-                
-        
+                self.model_final = UnguidedDenoiser(self.model_wrap_cfg)                                        
+
         sigmas = self.model_wrap.get_sigmas(n_steps)
         if init is not None:
             sigmas = sigmas[sigmas <= sigma_start]        
@@ -387,6 +386,8 @@ class Predictor(BasePredictor):
                 extra_args = {'cond': c, 'uncond': uc, 'cond_scale': self.latent_scale}                
                 
             print(f"using {self.sampling_mode} sampler")
+            if self.sampling_mode == "K-LMS":
+                sampler = K.sampling.sample_lms
             if self.sampling_mode == "Huen":                
                 sampler = K.sampling.sample_heun
             if self.sampling_mode == "DPM-2":
@@ -394,6 +395,6 @@ class Predictor(BasePredictor):
             if self.sampling_mode == "Euler":
                 sampler = K.sampling.sample_euler
             
-            self.samples = sampler(self.model_final, self.x, self.sigmas, s_churn=self.churn, callback=self.callback, extra_args=extra_args)
+            self.samples = sampler(self.model_final, self.x, self.sigmas, callback=self.callback, extra_args=extra_args)
                             
             self.success = True
